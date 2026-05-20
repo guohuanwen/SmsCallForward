@@ -23,6 +23,8 @@ public class HttpUtils {
     private static final String CONTENT = "{{content}}";
     private static final String REGEX = "(http(s)?://[^/]*/[^/]*)/";
     private static final String TOKEN = "access_token";
+    private static final int FEISHU_SUCCESS_CODE = 0;
+    private static final int FEISHU_RETRY_COUNT = 5;
 
     public static boolean custGet(String url, String title, String content) {
         try {
@@ -156,13 +158,38 @@ public class HttpUtils {
                     );
 
             Request request = new Request.Builder().url(url).post(requestBody).build();
-            Response response = client.newCall(request).execute();//发送请求
-            String result = response.body() != null ? response.body().string() : "";
-            XLog.d("postFeishuTalk successfully: " + result);
-            return true;
+            return postFeishuTalkWithRetry(request);
         } catch (Exception e) {
             XLog.e("postFeishuTalk error: " + e.getMessage());
             return false;
         }
+    }
+
+    private static boolean postFeishuTalkWithRetry(Request request) {
+        for (int attempt = 0; attempt <= FEISHU_RETRY_COUNT; attempt++) {
+            try (Response response = client.newCall(request).execute()) {
+                String result = response.body() != null ? response.body().string() : "";
+                JSONObject resultJSON = new JSONObject(result);
+                int code = resultJSON.optInt("code", -1);
+                if (response.isSuccessful() && code == FEISHU_SUCCESS_CODE) {
+                    XLog.d("postFeishuTalk successfully: " + result);
+                    return true;
+                }
+                XLog.e("postFeishuTalk failed, attempt " + (attempt + 1) + "/" + (FEISHU_RETRY_COUNT + 1) + ": " + result);
+            } catch (Exception e) {
+                XLog.e("postFeishuTalk error, attempt " + (attempt + 1) + "/" + (FEISHU_RETRY_COUNT + 1) + ": " + e.getMessage());
+            }
+
+            if (attempt < FEISHU_RETRY_COUNT) {
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    XLog.e("postFeishuTalk interrupted: " + e.getMessage());
+                    return false;
+                }
+            }
+        }
+        return false;
     }
 }
